@@ -1024,22 +1024,43 @@ function hwResizeCanvas(c,wCss,hCss,dpr){
 }
 function hwOpen(p){
   const {question,full,given}=hwLines(p);
-  const cellW=42, cellH=54;
   const cols=Math.max(...full.map(l=>l.length));
   const rows=full.length;
-  const wCss=cols*cellW, hCss=rows*cellH;
+
+  $("hwWrap").style.display="block";
+  const box=$("hwCanvasBox");
+  box.style.width=""; box.style.height="";
+  const availW = Math.max(200, box.clientWidth - 4);
+  const cellW = Math.max(26, Math.min(42, Math.floor(availW/cols)));
+  const cellH = Math.max(34, Math.round(cellW*1.28));
+  const checkH = Math.round(cellH*1.2);
+
+  const wCss=cols*cellW, hCss=rows*cellH+checkH;
   const dpr=window.devicePixelRatio||1;
   const bgCtx=hwResizeCanvas(hwBgC,wCss,hCss,dpr);
   hwResizeCanvas(hwAnsC,wCss,hCss,dpr);
   const drawCtx=hwResizeCanvas(hwDrawC,wCss,hCss,dpr);
   drawCtx.strokeStyle="#222"; drawCtx.fillStyle="#222";
-  drawCtx.lineWidth=6; drawCtx.lineCap="round"; drawCtx.lineJoin="round";
-  $("hwCanvasBox").style.width=wCss+"px";
-  $("hwCanvasBox").style.height=hCss+"px";
+  drawCtx.lineWidth=Math.max(4,Math.round(cellW*0.13)); drawCtx.lineCap="round"; drawCtx.lineJoin="round";
+  const BORDER=4; // .hw-canvas-box has a 2px border on each side (box-sizing:border-box)
+  box.style.width=(wCss+BORDER)+"px";
+  box.style.height=(hCss+BORDER)+"px";
   hwDrawGrid(bgCtx,cols,rows,cellW,cellH,wCss,hCss);
   hwDrawLines(bgCtx,question,cellW,cellH,"#3A3A3A",0);
+
+  const y0=rows*cellH;
+  bgCtx.strokeStyle="#C9C2AE"; bgCtx.lineWidth=2;
+  bgCtx.beginPath(); bgCtx.moveTo(0,y0+1); bgCtx.lineTo(wCss,y0+1); bgCtx.stroke();
+  bgCtx.save();
+  bgCtx.setLineDash([6,4]); bgCtx.lineWidth=1.5;
+  bgCtx.strokeRect(3, y0+5, wCss-6, checkH-9);
+  bgCtx.restore();
+  const lblSize=Math.max(10,Math.round(cellH*0.24));
+  bgCtx.font="bold "+lblSize+"px 'Zen Maru Gothic','Hiragino Maru Gothic ProN',sans-serif";
+  bgCtx.fillStyle="#9C9484"; bgCtx.textAlign="left"; bgCtx.textBaseline="middle";
+  bgCtx.fillText("せいごチェック（○か✓）", 10, y0+checkH/2);
+
   hwCur={full,given,cellW,cellH};
-  $("hwWrap").style.display="block";
 }
 $("prHandwrite").addEventListener("click",()=>{
   if(!prCur) return;
