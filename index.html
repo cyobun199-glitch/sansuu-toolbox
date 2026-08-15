@@ -115,6 +115,14 @@
   .feedback.good{ color:var(--green); } .feedback.retry{ color:#EF6F6C; }
   .stars{ text-align:center; font-size:15px; font-weight:700; color:#B4770A; margin-top:4px; }
 
+  .hw-wrap{ margin-top:16px; }
+  .hw-canvas-box{ position:relative; margin:0 auto; max-width:100%; overflow:auto;
+    background:#FAFAF5; border:2px solid var(--line); border-radius:12px; }
+  .hw-canvas-box canvas{ position:absolute; left:0; top:0; display:block; }
+  #hwAns{ pointer-events:none; }
+  #hwDraw{ touch-action:none; cursor:crosshair; -webkit-user-select:none; user-select:none; }
+  .hw-btnrow{ margin-top:10px; justify-content:center; }
+
   select{ font-family:inherit; font-size:14px; font-weight:700; padding:8px; border:2px solid var(--line); border-radius:10px; }
   .note{ font-size:12.5px; color:#777; line-height:1.7; margin-top:8px; }
 
@@ -276,9 +284,23 @@
       <span id="prAmariWrap" style="display:none; font-weight:900">あまり <input class="num-in" id="prA2" type="number" inputmode="numeric" value="0"></span>
       <button class="btn blue" id="prCheck">こたえあわせ</button>
       <button class="btn small" id="prShow">図で やってみる</button>
+      <button class="btn small" id="prHandwrite">✍️ 手書きでとく</button>
     </div>
     <div class="feedback" id="prFb"></div>
     <div class="stars" id="prStars"></div>
+
+    <div class="hw-wrap" id="hwWrap" style="display:none">
+      <div class="hissan-title">手書きで といてみよう（けいさんを マス目に 書きこもう）</div>
+      <div class="hw-canvas-box" id="hwCanvasBox">
+        <canvas id="hwBg"></canvas>
+        <canvas id="hwAns"></canvas>
+        <canvas id="hwDraw"></canvas>
+      </div>
+      <div class="row hw-btnrow">
+        <button class="btn small" id="hwClear">🧹 けす</button>
+        <button class="btn blue" id="hwCheck">こたえあわせ</button>
+      </div>
+    </div>
   </div>
 
   <!-- プリント -->
@@ -891,6 +913,7 @@ $("prNew").addEventListener("click",()=>{
   $("prA1").value=""; $("prA2").value="0";
   $("prFb").textContent=""; $("prFb").className="feedback";
   $("prA1").focus();
+  $("hwWrap").style.display="none";
 });
 $("prCheck").addEventListener("click",()=>{
   if(!prCur) return;
@@ -917,6 +940,155 @@ $("prShow").addEventListener("click",()=>{
     document.querySelector('[data-p="pAS"]').click();
   }
 });
+
+/* ==================================================
+   手書き練習：ひっ算のマス目に 自由に書きこむ
+   ================================================== */
+const hwBgC=$("hwBg"), hwAnsC=$("hwAns"), hwDrawC=$("hwDraw");
+let hwCur=null;
+
+function hwPack(full,given){
+  const question = full.map((line,i)=> given[i] ? line : "");
+  return {question, full, given};
+}
+function hwLines(p){
+  if(p.kind==="m"){
+    const {a,b}=p;
+    const W2 = Math.max(String(a*b).length, String(a).length, String(b).length+1)+2;
+    const P=(n,w)=>String(n).padStart(w," ");
+    if(b<10){
+      return hwPack([P(a,W2), "×"+P(b,W2-1), "─".repeat(W2), P(a*b,W2)], [true,true,true,false]);
+    }
+    const p1=a*(b%10), p2=a*Math.floor(b/10);
+    return hwPack(
+      [P(a,W2), "×"+P(b,W2-1), "─".repeat(W2), P(p1,W2), P(p2,W2-1)+" ", "─".repeat(W2), P(a*b,W2)],
+      [true,true,true,false,false,true,false]);
+  }
+  if(p.kind==="d"){
+    const M=computeDiv(p.d,p.v);
+    const full=divHissanTxt(M,p.v,M.L-1,M.L-1).split("\n");
+    return hwPack(full, full.map((_,i)=>i===1));
+  }
+  // kind "p"：たし算・ひき算
+  const D = p.op==="add" ? buildAdd(p.a,p.b) : buildSub(p.a,p.b);
+  const P=(n,w)=>String(n).padStart(w," ");
+  if(p.op==="add"){
+    const {a,b,L,sd,carriesInto}=D, W=L+1;
+    let carryLine="", resLine="";
+    for(let col=0;col<W;col++){
+      const place=W-1-col;
+      carryLine += (place<L && carriesInto[place]) ? "1" : " ";
+      resLine += (place<L) ? String(sd[place]) : " ";
+    }
+    return hwPack([carryLine, P(a,W), "+"+P(b,W-1), "─".repeat(W), resLine], [false,true,true,true,false]);
+  }
+  const {a,b,L,dd}=D, W=L+1;
+  let resLine="";
+  for(let col=0;col<W;col++){
+    const place=W-1-col;
+    resLine += (place<L) ? String(dd[place]) : " ";
+  }
+  return hwPack([P(a,W), "-"+P(b,W-1), "─".repeat(W), resLine], [true,true,true,false]);
+}
+function hwIsSepLine(line){ return line.length>0 && [...line].every(ch=>ch==="─"); }
+function hwDrawLines(ctx,lines,cellW,cellH,color,startRow){
+  ctx.font="bold "+Math.round(cellH*0.5)+"px 'Menlo','Consolas',monospace";
+  ctx.fillStyle=color; ctx.textAlign="center"; ctx.textBaseline="middle";
+  lines.forEach((line,i)=>{
+    const row=startRow+i;
+    if(hwIsSepLine(line)){
+      const y=row*cellH+6;
+      ctx.save(); ctx.strokeStyle=color; ctx.lineWidth=3;
+      ctx.beginPath(); ctx.moveTo(2,y); ctx.lineTo(line.length*cellW-2,y); ctx.stroke();
+      ctx.restore();
+      return;
+    }
+    [...line].forEach((ch,c)=>{
+      if(ch===" ") return;
+      ctx.fillText(ch, c*cellW+cellW/2, row*cellH+cellH/2);
+    });
+  });
+}
+function hwDrawGrid(ctx,cols,rows,cellW,cellH,w,h){
+  ctx.clearRect(0,0,w,h);
+  ctx.strokeStyle="#DCD7C9"; ctx.lineWidth=1;
+  for(let c=0;c<=cols;c++){ ctx.beginPath(); ctx.moveTo(c*cellW+0.5,0); ctx.lineTo(c*cellW+0.5,rows*cellH); ctx.stroke(); }
+  for(let r=0;r<=rows;r++){ ctx.beginPath(); ctx.moveTo(0,r*cellH+0.5); ctx.lineTo(cols*cellW,r*cellH+0.5); ctx.stroke(); }
+}
+function hwResizeCanvas(c,wCss,hCss,dpr){
+  c.width=Math.round(wCss*dpr); c.height=Math.round(hCss*dpr);
+  c.style.width=wCss+"px"; c.style.height=hCss+"px";
+  const ctx=c.getContext("2d");
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  return ctx;
+}
+function hwOpen(p){
+  const {question,full,given}=hwLines(p);
+  const cellW=42, cellH=54;
+  const cols=Math.max(...full.map(l=>l.length));
+  const rows=full.length;
+  const wCss=cols*cellW, hCss=rows*cellH;
+  const dpr=window.devicePixelRatio||1;
+  const bgCtx=hwResizeCanvas(hwBgC,wCss,hCss,dpr);
+  hwResizeCanvas(hwAnsC,wCss,hCss,dpr);
+  const drawCtx=hwResizeCanvas(hwDrawC,wCss,hCss,dpr);
+  drawCtx.strokeStyle="#222"; drawCtx.fillStyle="#222";
+  drawCtx.lineWidth=6; drawCtx.lineCap="round"; drawCtx.lineJoin="round";
+  $("hwCanvasBox").style.width=wCss+"px";
+  $("hwCanvasBox").style.height=hCss+"px";
+  hwDrawGrid(bgCtx,cols,rows,cellW,cellH,wCss,hCss);
+  hwDrawLines(bgCtx,question,cellW,cellH,"#3A3A3A",0);
+  hwCur={full,given,cellW,cellH};
+  $("hwWrap").style.display="block";
+}
+$("prHandwrite").addEventListener("click",()=>{
+  if(!prCur) return;
+  hwOpen(prCur);
+  $("hwWrap").scrollIntoView({behavior:"smooth", block:"nearest"});
+});
+$("hwClear").addEventListener("click",()=>{
+  const ctx=hwDrawC.getContext("2d");
+  ctx.save(); ctx.setTransform(1,0,0,1,0,0);
+  ctx.clearRect(0,0,hwDrawC.width,hwDrawC.height);
+  ctx.restore();
+});
+$("hwCheck").addEventListener("click",()=>{
+  if(!hwCur) return;
+  const {full,given,cellW,cellH}=hwCur;
+  const ctx=hwAnsC.getContext("2d");
+  ctx.save(); ctx.setTransform(1,0,0,1,0,0);
+  ctx.clearRect(0,0,hwAnsC.width,hwAnsC.height);
+  ctx.restore();
+  full.forEach((line,row)=>{
+    if(given[row]) return;
+    hwDrawLines(ctx,[line],cellW,cellH,"rgba(110,110,110,0.65)",row);
+  });
+});
+
+/* 手書きキャンバスへの描画（ポインター操作／タッチ対応） */
+let hwDrawing=null;
+hwDrawC.addEventListener("pointerdown",(e)=>{
+  e.preventDefault();
+  const r=hwDrawC.getBoundingClientRect();
+  hwDrawing={x:e.clientX-r.left, y:e.clientY-r.top};
+  const ctx=hwDrawC.getContext("2d");
+  ctx.beginPath(); ctx.arc(hwDrawing.x,hwDrawing.y,3,0,Math.PI*2); ctx.fill();
+  window.addEventListener("pointermove",hwDrawMove);
+  window.addEventListener("pointerup",hwDrawEnd,{once:true});
+  window.addEventListener("pointercancel",hwDrawEnd,{once:true});
+});
+function hwDrawMove(e){
+  if(!hwDrawing) return;
+  const r=hwDrawC.getBoundingClientRect();
+  const x=e.clientX-r.left, y=e.clientY-r.top;
+  const ctx=hwDrawC.getContext("2d");
+  ctx.beginPath(); ctx.moveTo(hwDrawing.x,hwDrawing.y); ctx.lineTo(x,y); ctx.stroke();
+  hwDrawing={x,y};
+}
+function hwDrawEnd(){
+  window.removeEventListener("pointermove",hwDrawMove);
+  hwDrawing=null;
+}
 
 /* ---------- プリント ---------- */
 $("ppMake").addEventListener("click",()=>{
