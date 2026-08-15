@@ -295,6 +295,7 @@
 
     <div class="hw-wrap" id="hwWrap" style="display:none">
       <div class="hissan-title">手書きで といてみよう（けいさんを マス目に 書きこもう）</div>
+      <div class="mini-help">くり上がり・くり下がりは 上の小さいマスに かこう</div>
       <div class="hw-canvas-box" id="hwCanvasBox">
         <canvas id="hwBg"></canvas>
         <canvas id="hwAns"></canvas>
@@ -1006,13 +1007,41 @@ function hwLines(p){
   return hwPack([P(a,W), "-"+P(b,W-1), "─".repeat(W), resLine], [true,true,true,false]);
 }
 function hwIsSepLine(line){ return line.length>0 && [...line].every(ch=>ch==="─"); }
-function hwDrawLines(ctx,lines,cellW,cellH,color,startRow){
+
+/* かけ算：問題の行と 各部分積の行の上に くり上がりメモ行を入れる
+   わり算：ひき算をする各段（引く数の行）の上に くり下がりメモ行を入れる */
+function hwMemoBeforeIndices(p,full,given){
+  if(p.kind==="m"){
+    const last=given.length-1;
+    const idx=[0];
+    given.forEach((g,i)=>{ if(!g && i!==last) idx.push(i); });
+    return idx;
+  }
+  if(p.kind==="d"){
+    const idx=[];
+    for(let i=2;i<full.length;i+=3) idx.push(i);
+    return idx;
+  }
+  return [];
+}
+function hwBuildLayout(rowCount,memoBefore,cellH,memoH){
+  const memoSet=new Set(memoBefore);
+  const rowY=[]; const memoBands=[];
+  let y=0;
+  for(let i=0;i<rowCount;i++){
+    if(memoSet.has(i)){ memoBands.push({y,h:memoH}); y+=memoH; }
+    rowY.push(y);
+    y+=cellH;
+  }
+  return {rowY, memoBands, totalH:y};
+}
+function hwDrawLinesAt(ctx,lines,rowY,cellW,cellH,color){
   ctx.font="bold "+Math.round(cellH*0.5)+"px 'Menlo','Consolas',monospace";
   ctx.fillStyle=color; ctx.textAlign="center"; ctx.textBaseline="middle";
   lines.forEach((line,i)=>{
-    const row=startRow+i;
+    const y0=rowY[i];
     if(hwIsSepLine(line)){
-      const y=row*cellH+6;
+      const y=y0+6;
       ctx.save(); ctx.strokeStyle=color; ctx.lineWidth=3;
       ctx.beginPath(); ctx.moveTo(2,y); ctx.lineTo(line.length*cellW-2,y); ctx.stroke();
       ctx.restore();
@@ -1020,15 +1049,26 @@ function hwDrawLines(ctx,lines,cellW,cellH,color,startRow){
     }
     [...line].forEach((ch,c)=>{
       if(ch===" ") return;
-      ctx.fillText(ch, c*cellW+cellW/2, row*cellH+cellH/2);
+      ctx.fillText(ch, c*cellW+cellW/2, y0+cellH/2);
     });
   });
 }
-function hwDrawGrid(ctx,cols,rows,cellW,cellH,w,h){
+function hwDrawGridLayout(ctx,cols,cellW,cellH,layout,w,h){
   ctx.clearRect(0,0,w,h);
+  const wCss=cols*cellW;
   ctx.strokeStyle="#DCD7C9"; ctx.lineWidth=1;
-  for(let c=0;c<=cols;c++){ ctx.beginPath(); ctx.moveTo(c*cellW+0.5,0); ctx.lineTo(c*cellW+0.5,rows*cellH); ctx.stroke(); }
-  for(let r=0;r<=rows;r++){ ctx.beginPath(); ctx.moveTo(0,r*cellH+0.5); ctx.lineTo(cols*cellW,r*cellH+0.5); ctx.stroke(); }
+  layout.rowY.forEach(y=>{
+    for(let c=0;c<=cols;c++){ ctx.beginPath(); ctx.moveTo(c*cellW+0.5,y); ctx.lineTo(c*cellW+0.5,y+cellH); ctx.stroke(); }
+    ctx.beginPath(); ctx.moveTo(0,y+0.5); ctx.lineTo(wCss,y+0.5); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0,y+cellH+0.5); ctx.lineTo(wCss,y+cellH+0.5); ctx.stroke();
+  });
+  ctx.save();
+  ctx.strokeStyle="#E7CFA6"; ctx.setLineDash([3,3]); ctx.lineWidth=1;
+  layout.memoBands.forEach(b=>{
+    for(let c=0;c<=cols;c++){ ctx.beginPath(); ctx.moveTo(c*cellW+0.5,b.y); ctx.lineTo(c*cellW+0.5,b.y+b.h); ctx.stroke(); }
+    ctx.strokeRect(0.5,b.y+0.5,wCss-1,b.h-1);
+  });
+  ctx.restore();
 }
 function hwResizeCanvas(c,wCss,hCss,dpr){
   c.width=Math.round(wCss*dpr); c.height=Math.round(hCss*dpr);
@@ -1041,15 +1081,28 @@ function hwOpen(p){
   const {question,full,given}=hwLines(p);
   const cols=Math.max(...full.map(l=>l.length));
   const rows=full.length;
+  const memoBefore=hwMemoBeforeIndices(p,full,given);
 
   $("hwWrap").style.display="block";
   const box=$("hwCanvasBox");
   box.style.width=""; box.style.height="";
   const availW = Math.max(200, box.clientWidth - 4);
-  const cellW = Math.max(26, Math.min(42, Math.floor(availW/cols)));
-  const cellH = Math.max(34, Math.round(cellW*1.28));
+  let cellW = Math.max(26, Math.min(42, Math.floor(availW/cols)));
+  let cellH = Math.max(34, Math.round(cellW*1.28));
+  let memoH = Math.max(16, Math.round(cellH*0.5));
+  let layout = hwBuildLayout(rows,memoBefore,cellH,memoH);
 
-  const wCss=cols*cellW, hCss=rows*cellH;
+  // メモ行の分だけ縦に伸びすぎる場合は、最低サイズを守りつつ縮小する
+  const targetH = Math.max(320, window.innerHeight*0.6);
+  if(layout.totalH>targetH){
+    const scale = Math.max(26/cellW, targetH/layout.totalH);
+    cellW = Math.max(26, Math.round(cellW*scale));
+    cellH = Math.max(34, Math.round(cellH*scale));
+    memoH = Math.max(16, Math.round(cellH*0.5));
+    layout = hwBuildLayout(rows,memoBefore,cellH,memoH);
+  }
+
+  const wCss=cols*cellW, hCss=layout.totalH;
   const dpr=window.devicePixelRatio||1;
   const bgCtx=hwResizeCanvas(hwBgC,wCss,hCss,dpr);
   hwResizeCanvas(hwAnsC,wCss,hCss,dpr);
@@ -1059,10 +1112,10 @@ function hwOpen(p){
   const BORDER=4; // .hw-canvas-box has a 2px border on each side (box-sizing:border-box)
   box.style.width=(wCss+BORDER)+"px";
   box.style.height=(hCss+BORDER)+"px";
-  hwDrawGrid(bgCtx,cols,rows,cellW,cellH,wCss,hCss);
-  hwDrawLines(bgCtx,question,cellW,cellH,"#3A3A3A",0);
+  hwDrawGridLayout(bgCtx,cols,cellW,cellH,layout,wCss,hCss);
+  hwDrawLinesAt(bgCtx,question,layout.rowY,cellW,cellH,"#3A3A3A");
 
-  hwCur={full,given,cellW,cellH};
+  hwCur={full,given,cellW,cellH,rowY:layout.rowY};
   hwUpdateCheckMark();
 }
 function hwUpdateCheckMark(){
@@ -1092,14 +1145,14 @@ $("hwClear").addEventListener("click",()=>{
 });
 $("hwCheck").addEventListener("click",()=>{
   if(!hwCur) return;
-  const {full,given,cellW,cellH}=hwCur;
+  const {full,given,cellW,cellH,rowY}=hwCur;
   const ctx=hwAnsC.getContext("2d");
   ctx.save(); ctx.setTransform(1,0,0,1,0,0);
   ctx.clearRect(0,0,hwAnsC.width,hwAnsC.height);
   ctx.restore();
   full.forEach((line,row)=>{
     if(given[row]) return;
-    hwDrawLines(ctx,[line],cellW,cellH,"rgba(110,110,110,0.65)",row);
+    hwDrawLinesAt(ctx,[line],[rowY[row]],cellW,cellH,"rgba(110,110,110,0.65)");
   });
 });
 
