@@ -122,6 +122,10 @@
   #hwAns{ pointer-events:none; }
   #hwDraw{ touch-action:none; cursor:crosshair; -webkit-user-select:none; user-select:none; }
   .hw-btnrow{ margin-top:10px; justify-content:center; }
+  .hw-check-area{ margin-top:10px; display:flex; align-items:center; justify-content:center; gap:10px;
+    flex-wrap:wrap; border:2px dashed var(--line); border-radius:12px; padding:10px 14px; min-height:60px; background:#fff; }
+  .hw-check-label{ font-size:12px; font-weight:700; color:#888; flex:1; min-width:140px; }
+  .hw-check-mark{ font-size:44px; font-weight:900; color:#E2574C; min-width:52px; text-align:center; line-height:1; }
 
   select{ font-family:inherit; font-size:14px; font-weight:700; padding:8px; border:2px solid var(--line); border-radius:10px; }
   .note{ font-size:12.5px; color:#777; line-height:1.7; margin-top:8px; }
@@ -295,6 +299,10 @@
         <canvas id="hwBg"></canvas>
         <canvas id="hwAns"></canvas>
         <canvas id="hwDraw"></canvas>
+      </div>
+      <div class="hw-check-area" id="hwCheckArea">
+        <span class="hw-check-label">せいごチェック：うえの「こたえ」を にゅうりょくすると 自動で出るよ</span>
+        <span class="hw-check-mark" id="hwCheckMark"></span>
       </div>
       <div class="row hw-btnrow">
         <button class="btn small" id="hwClear">🧹 けす</button>
@@ -914,6 +922,7 @@ $("prNew").addEventListener("click",()=>{
   $("prFb").textContent=""; $("prFb").className="feedback";
   $("prA1").focus();
   $("hwWrap").style.display="none";
+  $("hwCheckMark").textContent="";
 });
 $("prCheck").addEventListener("click",()=>{
   if(!prCur) return;
@@ -956,13 +965,19 @@ function hwLines(p){
     const {a,b}=p;
     const W2 = Math.max(String(a*b).length, String(a).length, String(b).length+1)+2;
     const P=(n,w)=>String(n).padStart(w," ");
-    if(b<10){
+    const bDigits = String(b).split("").reverse().map(Number); // 1のくらいから じゅんに
+    if(bDigits.length===1){
       return hwPack([P(a,W2), "×"+P(b,W2-1), "─".repeat(W2), P(a*b,W2)], [true,true,true,false]);
     }
-    const p1=a*(b%10), p2=a*Math.floor(b/10);
-    return hwPack(
-      [P(a,W2), "×"+P(b,W2-1), "─".repeat(W2), P(p1,W2), P(p2,W2-1)+" ", "─".repeat(W2), P(a*b,W2)],
-      [true,true,true,false,false,true,false]);
+    const lines=[P(a,W2), "×"+P(b,W2-1), "─".repeat(W2)];
+    const given=[true,true,true];
+    bDigits.forEach((d,i)=>{
+      lines.push(P(a*d, W2-i)+" ".repeat(i));
+      given.push(false);
+    });
+    lines.push("─".repeat(W2)); given.push(true);
+    lines.push(P(a*b,W2)); given.push(false);
+    return hwPack(lines, given);
   }
   if(p.kind==="d"){
     const M=computeDiv(p.d,p.v);
@@ -1033,9 +1048,8 @@ function hwOpen(p){
   const availW = Math.max(200, box.clientWidth - 4);
   const cellW = Math.max(26, Math.min(42, Math.floor(availW/cols)));
   const cellH = Math.max(34, Math.round(cellW*1.28));
-  const checkH = Math.round(cellH*1.2);
 
-  const wCss=cols*cellW, hCss=rows*cellH+checkH;
+  const wCss=cols*cellW, hCss=rows*cellH;
   const dpr=window.devicePixelRatio||1;
   const bgCtx=hwResizeCanvas(hwBgC,wCss,hCss,dpr);
   hwResizeCanvas(hwAnsC,wCss,hCss,dpr);
@@ -1048,20 +1062,23 @@ function hwOpen(p){
   hwDrawGrid(bgCtx,cols,rows,cellW,cellH,wCss,hCss);
   hwDrawLines(bgCtx,question,cellW,cellH,"#3A3A3A",0);
 
-  const y0=rows*cellH;
-  bgCtx.strokeStyle="#C9C2AE"; bgCtx.lineWidth=2;
-  bgCtx.beginPath(); bgCtx.moveTo(0,y0+1); bgCtx.lineTo(wCss,y0+1); bgCtx.stroke();
-  bgCtx.save();
-  bgCtx.setLineDash([6,4]); bgCtx.lineWidth=1.5;
-  bgCtx.strokeRect(3, y0+5, wCss-6, checkH-9);
-  bgCtx.restore();
-  const lblSize=Math.max(10,Math.round(cellH*0.24));
-  bgCtx.font="bold "+lblSize+"px 'Zen Maru Gothic','Hiragino Maru Gothic ProN',sans-serif";
-  bgCtx.fillStyle="#9C9484"; bgCtx.textAlign="left"; bgCtx.textBaseline="middle";
-  bgCtx.fillText("せいごチェック（○か✓）", 10, y0+checkH/2);
-
   hwCur={full,given,cellW,cellH};
+  hwUpdateCheckMark();
 }
+function hwUpdateCheckMark(){
+  const markEl=$("hwCheckMark");
+  if(!markEl || !prCur) return;
+  const v1=$("prA1").value;
+  if(v1===""){ markEl.textContent=""; return; }
+  const a1=+v1, a2=+($("prA2").value||0);
+  let ok=false;
+  if(prCur.kind==="d") ok=(a1===prCur.q && a2===prCur.r);
+  else if(prCur.kind==="m") ok=(a1===prCur.a*prCur.b);
+  else ok=(a1===prCur.ansNum);
+  markEl.textContent = ok ? "○" : "×";
+}
+$("prA1").addEventListener("input", hwUpdateCheckMark);
+$("prA2").addEventListener("input", hwUpdateCheckMark);
 $("prHandwrite").addEventListener("click",()=>{
   if(!prCur) return;
   hwOpen(prCur);
