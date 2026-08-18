@@ -1141,6 +1141,20 @@ $("prHandwrite").addEventListener("click",()=>{
   hwOpen(prCur);
   $("hwWrap").scrollIntoView({behavior:"smooth", block:"nearest"});
 });
+  /* ---------- 各タブから 手書きへ ---------- */
+function hwFromPanel(p){
+  hwOpen(p);
+  $("hwWrap").scrollIntoView({behavior:"smooth", block:"nearest"});
+}
+$("mHandwrite").addEventListener("click",()=>{
+  hwFromPanel({kind:"m", a:mult.a, b:mult.b});
+});
+$("dHandwrite").addEventListener("click",()=>{
+  hwFromPanel({kind:"d", d:dv.d, v:dv.v});
+});
+$("asHandwrite").addEventListener("click",()=>{
+  hwFromPanel({kind:"p", op:AS.op, a:AS.a, b:AS.b});
+});
 $("hwClear").addEventListener("click",()=>{
   const ctx=hwDrawC.getContext("2d");
   ctx.save(); ctx.setTransform(1,0,0,1,0,0);
